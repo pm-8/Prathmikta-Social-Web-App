@@ -4,6 +4,8 @@ import { HomePage } from "./components/HomePage";
 import { ComposePage } from "./components/ComposePage";
 import { ProfilePage } from "./components/ProfilePage";
 import { MyPostsPage } from "./components/MyPostsPage";
+import { LoginPage } from "./components/LoginPage";
+import { MunicipalDashboard } from "./components/MunicipalDashboard";
 import { Toaster } from "./components/ui/sonner";
 
 interface Post {
@@ -21,10 +23,17 @@ interface Post {
   isMyPost?: boolean;
 }
 
+interface User {
+  type: "citizen" | "municipal";
+  username: string;
+  name: string;
+}
+
 export default function App() {
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentPage, setCurrentPage] = useState("home");
   
-  // All posts for the homepage feed
+  // All posts for the homepage feed and municipal dashboard
   const [allPosts, setAllPosts] = useState<Post[]>([
     {
       id: "1",
@@ -35,6 +44,7 @@ export default function App() {
       upvotes: 24,
       comments: 8,
       isUpvoted: false,
+      status: "pending",
       createdAt: "2024-01-15",
       lastUpdated: "2024-01-20",
       isMyPost: false
@@ -47,6 +57,7 @@ export default function App() {
       upvotes: 15,
       comments: 5,
       isUpvoted: true,
+      status: "working",
       createdAt: "2024-01-18",
       lastUpdated: "2024-01-22",
       isMyPost: false
@@ -60,6 +71,7 @@ export default function App() {
       upvotes: 32,
       comments: 12,
       isUpvoted: false,
+      status: "solved",
       createdAt: "2024-01-20",
       lastUpdated: "2024-01-20",
       isMyPost: false
@@ -72,6 +84,7 @@ export default function App() {
       upvotes: 19,
       comments: 7,
       isUpvoted: false,
+      status: "pending",
       createdAt: "2024-01-10",
       lastUpdated: "2024-01-25",
       isMyPost: false
@@ -122,6 +135,20 @@ export default function App() {
     }
   ]);
 
+  const handleLogin = (userType: "citizen" | "municipal", userInfo: { username: string; name: string }) => {
+    setCurrentUser({ type: userType, ...userInfo });
+    if (userType === "municipal") {
+      setCurrentPage("municipal");
+    } else {
+      setCurrentPage("home");
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setCurrentPage("home");
+  };
+
   const handleNavigate = (page: string) => {
     setCurrentPage(page);
   };
@@ -149,10 +176,12 @@ export default function App() {
   };
 
   const handleCreatePost = (title: string, content: string, images: string[]) => {
+    if (!currentUser) return;
+    
     const currentDate = new Date().toISOString().split('T')[0];
     const newPost: Post = {
       id: Date.now().toString(),
-      username: "USER#1282", // Current user's username
+      username: currentUser.username,
       title,
       content,
       images: images.length > 0 ? images : undefined,
@@ -167,7 +196,9 @@ export default function App() {
 
     // Add to both all posts (for homepage) and my posts (for reports)
     setAllPosts(prev => [newPost, ...prev]);
-    setMyPosts(prev => [newPost, ...prev]);
+    if (currentUser.type === "citizen") {
+      setMyPosts(prev => [newPost, ...prev]);
+    }
   };
 
   const handleDeleteMyPost = (postId: string) => {
@@ -186,6 +217,32 @@ export default function App() {
     );
   };
 
+  // Municipal officer functionality
+  const handleUpdatePostStatus = (postId: string, newStatus: "pending" | "working" | "solved") => {
+    const updatedDate = new Date().toISOString().split('T')[0];
+    
+    setAllPosts(prev => 
+      prev.map(post => post.id === postId ? { 
+        ...post, 
+        status: newStatus, 
+        lastUpdated: updatedDate 
+      } : post)
+    );
+    
+    setMyPosts(prev => 
+      prev.map(post => post.id === postId ? { 
+        ...post, 
+        status: newStatus, 
+        lastUpdated: updatedDate 
+      } : post)
+    );
+  };
+
+  // If no user is logged in, show login page
+  if (!currentUser) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+
   const renderPage = () => {
     switch (currentPage) {
       case "home":
@@ -199,6 +256,14 @@ export default function App() {
           />
         );
       case "compose":
+        // Only allow citizens to compose new posts
+        if (currentUser.type !== "citizen") {
+          return (
+            <div className="min-h-screen bg-background flex items-center justify-center">
+              <p className="text-muted-foreground">Access denied. Only citizens can report new issues.</p>
+            </div>
+          );
+        }
         return (
           <ComposePage 
             onNavigate={handleNavigate}
@@ -208,12 +273,37 @@ export default function App() {
       case "profile":
         return <ProfilePage onNavigate={handleNavigate} />;
       case "posts":
+        // Only show citizen's own posts
+        if (currentUser.type !== "citizen") {
+          return (
+            <div className="min-h-screen bg-background flex items-center justify-center">
+              <p className="text-muted-foreground">Access denied. This page is only for citizens.</p>
+            </div>
+          );
+        }
         return (
           <MyPostsPage 
             onNavigate={handleNavigate}
             posts={myPosts}
             onDeletePost={handleDeleteMyPost}
             onUpdatePost={handleUpdateMyPost}
+          />
+        );
+      case "municipal":
+        // Only allow municipal officers
+        if (currentUser.type !== "municipal") {
+          return (
+            <div className="min-h-screen bg-background flex items-center justify-center">
+              <p className="text-muted-foreground">Access denied. This page is only for municipal officers.</p>
+            </div>
+          );
+        }
+        return (
+          <MunicipalDashboard 
+            onNavigate={handleNavigate}
+            posts={allPosts}
+            onUpdatePostStatus={handleUpdatePostStatus}
+            userInfo={currentUser}
           />
         );
       default:
@@ -231,7 +321,13 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Navigation currentPage={currentPage} onNavigate={handleNavigate} />
+      <Navigation 
+        currentPage={currentPage} 
+        onNavigate={handleNavigate}
+        userType={currentUser.type}
+        userInfo={currentUser}
+        onLogout={handleLogout}
+      />
       {renderPage()}
       <Toaster />
     </div>
